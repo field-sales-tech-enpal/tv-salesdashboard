@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sales TV (Looker + Celebration)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+
+    .frame {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1200ms ease-in-out;
+    }
+    .frame.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #celebration {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background-repeat: no-repeat;
+      background-position: center center;
+      background-size: cover;
+      color: #fff;
+      text-align: center;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 60px 8vw;
+      box-sizing: border-box;
+    }
+
+    #celebration h1 {
+      font-size: 72px;
+      margin: 0;
+      text-shadow: 0 0 20px rgba(0,0,0,0.8);
+      max-width: 1400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    #celebration p {
+      font-size: 32px;
+      margin-top: 18px;
+      max-width: 1400px;
+      line-height: 1.3;
+      white-space: pre-wrap;
+      text-shadow: 0 0 15px rgba(0,0,0,0.8);
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Celebration Overlay -->
+  <div id="celebration">
+    <h1 id="celeTitle">🎉 CELEBRATION 🎉</h1>
+    <p id="msg"></p>
+  </div>
+
+  <!-- Celebration Sounds -->
+  <audio id="sound-idv" preload="auto">
+    <source src="https://actions.google.com/sounds/v1/cash_register/cash_register_open.ogg" type="audio/ogg">
+  </audio>
+
+  <audio id="sound-tbk" preload="auto">
+    <source src="https://actions.google.com/sounds/v1/crowd/crowd_cheer.ogg" type="audio/ogg">
+  </audio>
+
+  <script>
+    /******************** LOOKER SLIDES ********************/
+    const PAGES = [
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/kMFmF",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_9j0kd2f9zd",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_mql5w6hc0d",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_dl20oeic0d",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_pnjbc5kc0d",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_3pifgdlc0d",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_i1q8nglc0d"
+    ];
+    const SLIDE_MS = 150000;
+
+    /******************** BACKGROUND REFRESH ********************/
+    const PER_SLIDE_REFRESH_MS = 120 * 1000;
+    const REFRESH_WORKER_MS = 15000;
+
+    function withCacheBust(url) {
+      const sep = url.includes("?") ? "&" : "?";
+      return url + sep + "cb=" + Date.now();
+    }
+
+    const frames = PAGES.map((url, i) => {
+      const iframe = document.createElement("iframe");
+      iframe.src = withCacheBust(url);
+      iframe.className = "frame" + (i === 0 ? " show" : "");
+      document.body.appendChild(iframe);
+      return iframe;
+    });
+
+    let current = 0;
+
+    function showFrame(index) {
+      frames.forEach((f, i) => f.classList.toggle("show", i === index));
+      current = index;
+    }
+
+    setInterval(() => {
+      if (isCelebrationVisible()) return;
+      showFrame((current + 1) % frames.length);
+    }, SLIDE_MS);
+
+    const lastReload = Array(frames.length).fill(Date.now());
+    let refreshCursor = 0;
+
+    function refreshHiddenFramesIfDue() {
+      if (isCelebrationVisible()) return;
+      const now = Date.now();
+
+      for (let tries = 0; tries < frames.length; tries++) {
+        const i = (refreshCursor + tries) % frames.length;
+        if (i === current) continue;
+        if (now - lastReload[i] >= PER_SLIDE_REFRESH_MS) {
+          frames[i].src = withCacheBust(PAGES[i]);
+          lastReload[i] = now;
+          refreshCursor = (i + 1) % frames.length;
+          return;
+        }
+      }
+    }
+    setInterval(refreshHiddenFramesIfDue, REFRESH_WORKER_MS);
+
+    /******************** CELEBRATIONS ********************/
+    const triggerUrl = "https://script.google.com/macros/s/AKfycbwPFEP8tWC85Xo5RVvjwNvMXSI-W6iqcIvnCfKIpJrehVX-X6jEfaqDkFR_dWTB_ApduA/exec";
+    const POLL_MS = 2000;
+
+    const CELEBRATIONS = {
+      IDV: {
+        title: "🎉 NEW IDV 🎉",
+        gif: "https://media.giphy.com/media/Is1O1TWV0LEJi/giphy.gif",
+        sound: document.getElementById("sound-idv")
+      },
+      TBK: {
+        title: "🏆 NEW TBK 🏆",
+        gif: "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
+        sound: document.getElementById("sound-tbk")
+      }
+    };
+
+    const celebrationEl = document.getElementById("celebration");
+    const titleEl = document.getElementById("celeTitle");
+    const msgEl = document.getElementById("msg");
+
+    let overlayVisible = false;
+    let currentCelebrationKey = null;
+
+    function showOverlay(kindKey, message) {
+      const cfg = CELEBRATIONS[kindKey];
+      if (!cfg) return;
+
+      if (currentCelebrationKey !== kindKey) {
+        titleEl.textContent = cfg.title;
+        celebrationEl.style.backgroundImage =
+          `linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.25)), url("${cfg.gif}")`;
+        currentCelebrationKey = kindKey;
+      }
+
+      msgEl.innerText = message || "";
+
+      if (!overlayVisible && cfg.sound) {
+        try {
+          cfg.sound.currentTime = 0;
+          cfg.sound.play();
+        } catch (e) {
+          console.log("Audio autoplay blocked");
+        }
+      }
+
+      celebrationEl.style.display = "flex";
+      overlayVisible = true;
+    }
+
+    function hideOverlay() {
+      celebrationEl.style.display = "none";
+      msgEl.innerText = "";
+      overlayVisible = false;
+      currentCelebrationKey = null;
+    }
+
+    function isCelebrationVisible() {
+      return celebrationEl.style.display === "flex";
+    }
+
+    function normUpper(v){ return (v ?? "").toString().trim().toUpperCase(); }
+    function norm(v){ return (v ?? "").toString().trim(); }
+
+    async function poll() {
+      try {
+        const res = await fetch(triggerUrl + "?cb=" + Date.now(), { cache: "no-store" });
+        const data = await res.json();
+        const status = normUpper(data.status);
+        const message = norm(data.message);
+
+        if (CELEBRATIONS[status]) showOverlay(status, message);
+        else if (overlayVisible) hideOverlay();
+
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    poll();
+    setInterval(poll, POLL_MS);
+
+    function unlockAudio() {
+  const sounds = document.querySelectorAll("audio");
+  sounds.forEach(a => {
+    const prevVol = a.volume;
+    a.volume = 0;
+    a.play().then(() => {
+      a.pause();
+      a.currentTime = 0;
+      a.volume = prevVol;
+    }).catch(() => {});
+  });
+
+  window.removeEventListener("pointerdown", unlockAudio);
+  window.removeEventListener("keydown", unlockAudio);
+}
+
+window.addEventListener("pointerdown", unlockAudio, { once: true });
+window.addEventListener("keydown", unlockAudio, { once: true });
+
+  </script>
+
+</body>
+</html>
