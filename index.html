@@ -16,25 +16,23 @@
       font-family: Arial, sans-serif;
     }
 
+    /* Fire TV/Silk-friendly: avoid inset + avoid opacity transitions */
     .frame {
       position: fixed;
-      inset: 0;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       border: none;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 1200ms ease-in-out;
-    }
-    .frame.show {
-      opacity: 1;
-      pointer-events: auto;
+      background: #000;
     }
 
     #celebration {
       display: none;
       position: fixed;
-      inset: 0;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
       z-index: 9999;
       background-repeat: no-repeat;
       background-position: center center;
@@ -78,6 +76,14 @@
     <p id="msg"></p>
   </div>
 
+  <!-- Main (single) iframe: more stable on Fire TV -->
+  <iframe
+    id="mainFrame"
+    class="frame"
+    allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+
   <!-- Celebration Sounds -->
   <audio id="sound-idv" preload="auto">
     <source src="https://actions.google.com/sounds/v1/cash_register/cash_register_open.ogg" type="audio/ogg">
@@ -93,61 +99,46 @@
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/kMFmF",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_9j0kd2f9zd",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_mql5w6hc0d",
+      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_mql5w6hc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_dl20oeic0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_pnjbc5kc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_3pifgdlc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_i1q8nglc0d"
     ];
+
+    // slide duration
     const SLIDE_MS = 150000;
 
-    /******************** BACKGROUND REFRESH ********************/
-    const PER_SLIDE_REFRESH_MS = 120 * 1000;
-    const REFRESH_WORKER_MS = 15000;
+    // optional: hard refresh current slide every N minutes (keeps data super fresh)
+    const HARD_REFRESH_MS = 5 * 60 * 1000; // 5 min
 
     function withCacheBust(url) {
       const sep = url.includes("?") ? "&" : "?";
       return url + sep + "cb=" + Date.now();
     }
 
-    const frames = PAGES.map((url, i) => {
-      const iframe = document.createElement("iframe");
-      iframe.src = withCacheBust(url);
-      iframe.className = "frame" + (i === 0 ? " show" : "");
-      document.body.appendChild(iframe);
-      return iframe;
-    });
-
+    const frame = document.getElementById("mainFrame");
     let current = 0;
 
-    function showFrame(index) {
-      frames.forEach((f, i) => f.classList.toggle("show", i === index));
+    function showSlide(index) {
       current = index;
+      frame.src = withCacheBust(PAGES[current]);
     }
 
+    // Start immediately
+    showSlide(0);
+
+    // Rotate slides
     setInterval(() => {
       if (isCelebrationVisible()) return;
-      showFrame((current + 1) % frames.length);
+      showSlide((current + 1) % PAGES.length);
     }, SLIDE_MS);
 
-    const lastReload = Array(frames.length).fill(Date.now());
-    let refreshCursor = 0;
-
-    function refreshHiddenFramesIfDue() {
+    // Hard refresh the current slide periodically (ensures multiple daily updates always show)
+    setInterval(() => {
       if (isCelebrationVisible()) return;
-      const now = Date.now();
-
-      for (let tries = 0; tries < frames.length; tries++) {
-        const i = (refreshCursor + tries) % frames.length;
-        if (i === current) continue;
-        if (now - lastReload[i] >= PER_SLIDE_REFRESH_MS) {
-          frames[i].src = withCacheBust(PAGES[i]);
-          lastReload[i] = now;
-          refreshCursor = (i + 1) % frames.length;
-          return;
-        }
-      }
-    }
-    setInterval(refreshHiddenFramesIfDue, REFRESH_WORKER_MS);
+      showSlide(current);
+    }, HARD_REFRESH_MS);
 
     /******************** CELEBRATIONS ********************/
     const triggerUrl = "https://script.google.com/macros/s/AKfycbwPFEP8tWC85Xo5RVvjwNvMXSI-W6iqcIvnCfKIpJrehVX-X6jEfaqDkFR_dWTB_ApduA/exec";
@@ -191,6 +182,7 @@
           cfg.sound.currentTime = 0;
           cfg.sound.play();
         } catch (e) {
+          // Fire TV often blocks autoplay until user interacts once
           console.log("Audio autoplay blocked");
         }
       }
@@ -231,25 +223,35 @@
     poll();
     setInterval(poll, POLL_MS);
 
+    // One-time audio unlock after any user interaction (remote key press counts)
     function unlockAudio() {
-  const sounds = document.querySelectorAll("audio");
-  sounds.forEach(a => {
-    const prevVol = a.volume;
-    a.volume = 0;
-    a.play().then(() => {
-      a.pause();
-      a.currentTime = 0;
-      a.volume = prevVol;
-    }).catch(() => {});
-  });
+      const sounds = document.querySelectorAll("audio");
+      sounds.forEach(a => {
+        const prevVol = a.volume;
+        a.volume = 0;
+        a.play().then(() => {
+          a.pause();
+          a.currentTime = 0;
+          a.volume = prevVol;
+        }).catch(() => {});
+      });
 
-  window.removeEventListener("pointerdown", unlockAudio);
-  window.removeEventListener("keydown", unlockAudio);
-}
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    }
 
-window.addEventListener("pointerdown", unlockAudio, { once: true });
-window.addEventListener("keydown", unlockAudio, { once: true });
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
 
+    // Optional: watchdog reload if iframe gets stuck black (TV browser hiccup)
+    // If you ever see black after long uptime, uncomment this:
+    /*
+    setInterval(() => {
+      if (isCelebrationVisible()) return;
+      // reload the same slide every 30 minutes as a safety net
+      showSlide(current);
+    }, 30 * 60 * 1000);
+    */
   </script>
 
 </body>
