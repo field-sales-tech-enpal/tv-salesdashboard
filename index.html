@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <title>Sales TV (Looker + Celebration)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
   <style>
     html, body {
       margin: 0;
@@ -16,17 +15,25 @@
       font-family: Arial, sans-serif;
     }
 
-    /* Fire TV/Silk-friendly: avoid inset + avoid opacity transitions */
+    /* Two-frame “double buffer” to avoid visible loading */
     .frame {
       position: fixed;
-      top: 0;
-      left: 0;
+      top: 0; left: 0;
       width: 100%;
       height: 100%;
       border: none;
       background: #000;
+
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 250ms linear;
+    }
+    .frame.show {
+      opacity: 1;
+      pointer-events: auto;
     }
 
+    /* Celebration overlay on top of frames */
     #celebration {
       display: none;
       position: fixed;
@@ -76,9 +83,16 @@
     <p id="msg"></p>
   </div>
 
-  <!-- Main (single) iframe: more stable on Fire TV -->
+  <!-- Two iframes: one visible, one preloading next -->
   <iframe
-    id="mainFrame"
+    id="frameA"
+    class="frame show"
+    allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+
+  <iframe
+    id="frameB"
     class="frame"
     allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
     referrerpolicy="no-referrer-when-downgrade"
@@ -99,45 +113,86 @@
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/kMFmF",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_9j0kd2f9zd",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_mql5w6hc0d",
-      "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_mql5w6hc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_dl20oeic0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_pnjbc5kc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_3pifgdlc0d",
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_i1q8nglc0d"
     ];
 
-    // slide duration
+    // Time each slide stays visible
     const SLIDE_MS = 150000;
 
-    // optional: hard refresh current slide every N minutes (keeps data super fresh)
-    const HARD_REFRESH_MS = 5 * 60 * 1000; // 5 min
+    // Optional: force-refresh the currently visible slide every N minutes (keeps data very fresh)
+    const HARD_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
     function withCacheBust(url) {
       const sep = url.includes("?") ? "&" : "?";
       return url + sep + "cb=" + Date.now();
     }
 
-    const frame = document.getElementById("mainFrame");
-    let current = 0;
+    const frameA = document.getElementById("frameA");
+    const frameB = document.getElementById("frameB");
 
-    function showSlide(index) {
-      current = index;
-      frame.src = withCacheBust(PAGES[current]);
+    let current = 0;          // index of currently visible slide
+    let activeIsA = true;     // true => A visible, false => B visible
+
+    function activeFrame() { return activeIsA ? frameA : frameB; }
+    function hiddenFrame() { return activeIsA ? frameB : frameA; }
+
+    function showActive(isA) {
+      activeIsA = isA;
+      frameA.classList.toggle("show", activeIsA);
+      frameB.classList.toggle("show", !activeIsA);
     }
 
-    // Start immediately
-    showSlide(0);
+    // Loads a slide into a frame, calls cb when the iframe fires "load"
+    function loadInto(frame, pageIndex, cb) {
+      frame.onload = null;
+      frame.src = withCacheBust(PAGES[pageIndex]);
+      frame.onload = () => cb && cb();
+    }
 
-    // Rotate slides
+    // Preload the next slide into the hidden frame
+    function preloadNext() {
+      const next = (current + 1) % PAGES.length;
+      loadInto(hiddenFrame(), next);
+    }
+
+    // Switch to the next slide with “swap on load”
+    function goNext() {
+      if (isCelebrationVisible()) return;
+
+      const next = (current + 1) % PAGES.length;
+      const hidden = hiddenFrame();
+
+      // Load next slide into hidden; once it finishes, flip visibility
+      loadInto(hidden, next, () => {
+        current = next;
+        showActive(!activeIsA);      // hidden becomes visible
+        preloadNext();               // preload the following slide
+      });
+    }
+
+    // Initial load: load slide 0 into A, and preload slide 1 into B
+    loadInto(frameA, 0, () => {
+      showActive(true);
+      preloadNext();
+    });
+
+    // Slide rotation
+    setInterval(goNext, SLIDE_MS);
+
+    // Hard refresh visible slide (no switch)
     setInterval(() => {
       if (isCelebrationVisible()) return;
-      showSlide((current + 1) % PAGES.length);
-    }, SLIDE_MS);
 
-    // Hard refresh the current slide periodically (ensures multiple daily updates always show)
-    setInterval(() => {
-      if (isCelebrationVisible()) return;
-      showSlide(current);
+      const active = activeFrame();
+      // Reload the SAME page in the ACTIVE frame; you may see a brief refresh.
+      // If you want ZERO visible refresh, set HARD_REFRESH_MS to something large (or disable it).
+      loadInto(active, current, () => {
+        // After refresh, ensure next slide is still preloaded
+        preloadNext();
+      });
     }, HARD_REFRESH_MS);
 
     /******************** CELEBRATIONS ********************/
@@ -182,7 +237,6 @@
           cfg.sound.currentTime = 0;
           cfg.sound.play();
         } catch (e) {
-          // Fire TV often blocks autoplay until user interacts once
           console.log("Audio autoplay blocked");
         }
       }
@@ -223,7 +277,7 @@
     poll();
     setInterval(poll, POLL_MS);
 
-    // One-time audio unlock after any user interaction (remote key press counts)
+    // One-time audio unlock after any user interaction
     function unlockAudio() {
       const sounds = document.querySelectorAll("audio");
       sounds.forEach(a => {
@@ -243,14 +297,13 @@
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
 
-    // Optional: watchdog reload if iframe gets stuck black (TV browser hiccup)
-    // If you ever see black after long uptime, uncomment this:
+    /******************** OPTIONAL FIRE-TV SAFETY NET ********************/
+    // If Silk gets stuck, you can reload the whole page every few hours.
+    // Uncomment if needed:
     /*
     setInterval(() => {
-      if (isCelebrationVisible()) return;
-      // reload the same slide every 30 minutes as a safety net
-      showSlide(current);
-    }, 30 * 60 * 1000);
+      location.reload();
+    }, 6 * 60 * 60 * 1000); // every 6 hours
     */
   </script>
 
