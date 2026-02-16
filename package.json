@@ -1,0 +1,11 @@
+{
+  "name": "tv-salesdashboard-shots",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shots": "node tools/screenshot-looker.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
