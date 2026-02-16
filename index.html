@@ -235,39 +235,47 @@
     document.getElementById("testBtn").onclick = () => showOverlay("IDV", "Test overlay works ✅");
     document.getElementById("hideBtn").onclick = () => hideOverlay();
 
-    async function poll(){
-      const url = triggerUrl + (triggerUrl.includes("?") ? "&" : "?") + "cb=" + Date.now();
-      try {
-        const res = await fetch(url, { cache: "no-store", credentials: "omit" });
+    async function poll() {
+  const url = triggerUrl + (triggerUrl.includes("?") ? "&" : "?") + "cb=" + Date.now();
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      redirect: "follow",
+      credentials: "omit",
+      mode: "cors"
+    });
 
-        const ct = (res.headers.get("content-type") || "").toLowerCase();
-        const text = await res.text();
+    const finalUrl = res.url || "(no url)";
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    const text = await res.text();
 
-        // Debug shows EXACTLY what the TV is receiving
-        setDbg(
-          "poll " + new Date().toLocaleTimeString() + "\n" +
-          "http " + res.status + "\n" +
-          "ct " + ct + "\n" +
-          "body " + text.slice(0, 120)
-        );
+    setDbg(
+      "poll " + new Date().toLocaleTimeString() + "\n" +
+      "http " + res.status + "\n" +
+      "final " + finalUrl + "\n" +
+      "ct " + ct + "\n" +
+      "body " + text.slice(0, 140)
+    );
 
-        if (!ct.includes("application/json")) return;
+    if (!ct.includes("application/json")) return;
 
-        const data = JSON.parse(text);
-        const status = normUpper(data.status);
-        const message = norm(data.message);
+    const data = JSON.parse(text);
+    const status = normUpper(data.status);
+    const message = norm(data.message);
 
-        if (CELEBRATIONS[status]) showOverlay(status, message);
-        else if (overlayVisible) hideOverlay();
+    if (CELEBRATIONS[status]) showOverlay(status, message);
+    else if (overlayVisible) hideOverlay();
 
-      } catch (e) {
-        setDbg("poll error:\n" + String(e));
-      }
-    }
+  } catch (e) {
+    setDbg("poll error:\n" + String(e));
+  }
+}
+
 
     poll();
     setInterval(poll, POLL_MS);
   </script>
 </body>
 </html>
+
 
