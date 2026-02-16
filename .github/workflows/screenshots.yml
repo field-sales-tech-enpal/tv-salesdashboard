@@ -3,7 +3,12 @@ name: Update Looker screenshots
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # ✅ every 10 minutes
+    - cron: "*/5 * * * *"
+
+# ✅ prevents two runs pushing at the same time
+concurrency:
+  group: looker-screenshots
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -14,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # ✅ needed for pull --rebase to work reliably
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -31,8 +38,18 @@ jobs:
 
       - name: Commit & push updated images
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add shots
-          git commit -m "Update Looker screenshots" || echo "No changes"
-          git push
+
+          # If nothing changed, exit cleanly
+          git diff --cached --quiet && echo "No changes" && exit 0
+
+          git commit -m "Update Looker screenshots"
+
+          # ✅ rebase on latest remote to avoid non-fast-forward
+          git pull --rebase origin main
+
+          git push origin main
