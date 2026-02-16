@@ -15,7 +15,7 @@
       font-family: Arial, sans-serif;
     }
 
-    /* Two-frame “double buffer” to avoid visible loading */
+    /* Two-frame double buffer */
     .frame {
       position: fixed;
       top: 0; left: 0;
@@ -26,14 +26,36 @@
 
       opacity: 0;
       pointer-events: none;
-      transition: opacity 250ms linear;
+      transition: opacity 220ms linear;
     }
     .frame.show {
       opacity: 1;
       pointer-events: auto;
     }
 
-    /* Celebration overlay on top of frames */
+    /* Smooth loading overlay while next slide preloads */
+    #loading {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      color: #fff;
+      font-size: 28px;
+      letter-spacing: 0.5px;
+    }
+    #loading small {
+      display: block;
+      opacity: 0.65;
+      margin-top: 10px;
+      font-size: 18px;
+    }
+
+    /* Celebration overlay on top of everything */
     #celebration {
       display: none;
       position: fixed;
@@ -77,6 +99,12 @@
 
 <body>
 
+  <!-- Loading overlay (shows while next slide is warming up) -->
+  <div id="loading">
+    Loading next slide…
+    <small>(This keeps transitions smooth on Fire TV)</small>
+  </div>
+
   <!-- Celebration Overlay -->
   <div id="celebration">
     <h1 id="celeTitle">🎉 CELEBRATION 🎉</h1>
@@ -119,81 +147,153 @@
       "https://lookerstudio.google.com/embed/reporting/8d1bd4f1-48eb-4ab3-a749-20fb4f0cbc1a/page/p_i1q8nglc0d"
     ];
 
-    // Time each slide stays visible
-    const SLIDE_MS = 150000;
+    // Slide duration (you can increase this if Looker is heavy)
+    const SLIDE_MS = 150000; // 2m30s
 
-    // Optional: force-refresh the currently visible slide every N minutes (keeps data very fresh)
-    const HARD_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+    // Start preloading the next slide after this fraction of the current slide has been shown
+    // (preload earlier = smoother switches)
+    const PRELOAD_AT_FRACTION = 0.45; // 45% into the slide
 
-    function withCacheBust(url) {
+    // IMPORTANT: don't cache-bust every switch; bucket it (big speedup).
+    // Set to 2-5 minutes. This still updates many times/day but avoids constant cold loads.
+    const CACHE_WINDOW_MS = 3 * 60 * 1000; // 3 minutes
+
+    // If the next slide takes too long to load, we still switch after this time (fallback)
+    const MAX_PRELOAD_WAIT_MS = 45000; // 45s
+
+    function cacheToken() {
+      return Math.floor(Date.now() / CACHE_WINDOW_MS);
+    }
+    function withCache(url) {
       const sep = url.includes("?") ? "&" : "?";
-      return url + sep + "cb=" + Date.now();
+      return url + sep + "cb=" + cacheToken();
+    }
+
+    const loadingEl = document.getElementById("loading");
+    function showLoading(v) {
+      if (isCelebrationVisible()) return;
+      loadingEl.style.display = v ? "flex" : "none";
     }
 
     const frameA = document.getElementById("frameA");
     const frameB = document.getElementById("frameB");
 
-    let current = 0;          // index of currently visible slide
-    let activeIsA = true;     // true => A visible, false => B visible
+    let current = 0;          // currently visible slide index
+    let activeIsA = true;     // true => A visible; false => B visible
+    let preloadTimer = null;
+    let rotateTimer = null;
 
     function activeFrame() { return activeIsA ? frameA : frameB; }
     function hiddenFrame() { return activeIsA ? frameB : frameA; }
 
-    function showActive(isA) {
+    function setVisible(isA) {
       activeIsA = isA;
       frameA.classList.toggle("show", activeIsA);
       frameB.classList.toggle("show", !activeIsA);
     }
 
-    // Loads a slide into a frame, calls cb when the iframe fires "load"
-    function loadInto(frame, pageIndex, cb) {
+    function isIframeLoadedEnough(frame) {
+      // Cross-origin: we can't inspect content. Best we can do is rely on onload events.
+      // So this function is intentionally minimal.
+      return true;
+    }
+
+    function loadInto(frame, pageIndex, onDone) {
       frame.onload = null;
-      frame.src = withCacheBust(PAGES[pageIndex]);
-      frame.onload = () => cb && cb();
+      frame.src = withCache(PAGES[pageIndex]);
+      frame.onload = () => onDone && onDone();
     }
 
-    // Preload the next slide into the hidden frame
-    function preloadNext() {
-      const next = (current + 1) % PAGES.length;
-      loadInto(hiddenFrame(), next);
-    }
+    // Preload logic: start preloading next slide in hidden frame,
+    // then at switch time we usually just flip instantly.
+    let nextIndex = 1;
+    let nextReady = false;
+    let nextLoadStartedAt = 0;
+    let nextLoadTimeout = null;
 
-    // Switch to the next slide with “swap on load”
-    function goNext() {
+    function startPreloadNext() {
       if (isCelebrationVisible()) return;
 
-      const next = (current + 1) % PAGES.length;
+      nextIndex = (current + 1) % PAGES.length;
+      nextReady = false;
+      nextLoadStartedAt = Date.now();
+
       const hidden = hiddenFrame();
-
-      // Load next slide into hidden; once it finishes, flip visibility
-      loadInto(hidden, next, () => {
-        current = next;
-        showActive(!activeIsA);      // hidden becomes visible
-        preloadNext();               // preload the following slide
+      loadInto(hidden, nextIndex, () => {
+        nextReady = true;
+        // If we're already at/after switch time, swap immediately
       });
+
+      // Fallback: if Looker never fires load (or is super slow), allow swap anyway after a max wait
+      clearTimeout(nextLoadTimeout);
+      nextLoadTimeout = setTimeout(() => {
+        nextReady = true; // allow swap even if not fully loaded
+      }, MAX_PRELOAD_WAIT_MS);
     }
 
-    // Initial load: load slide 0 into A, and preload slide 1 into B
+    function schedulePreloadAndRotate() {
+      clearTimeout(preloadTimer);
+      clearTimeout(rotateTimer);
+
+      // Start preloading after a portion of SLIDE_MS
+      preloadTimer = setTimeout(() => {
+        startPreloadNext();
+      }, Math.floor(SLIDE_MS * PRELOAD_AT_FRACTION));
+
+      // Rotate at SLIDE_MS (swap to preloaded slide)
+      rotateTimer = setTimeout(() => {
+        rotateToNextSmooth();
+      }, SLIDE_MS);
+    }
+
+    function rotateToNextSmooth() {
+      if (isCelebrationVisible()) {
+        // If a celebration is on, postpone a bit and try again
+        rotateTimer = setTimeout(rotateToNextSmooth, 1500);
+        return;
+      }
+
+      // If preload hasn't been started yet (e.g., short slide), start now
+      if (!nextLoadStartedAt || nextIndex !== (current + 1) % PAGES.length) {
+        startPreloadNext();
+      }
+
+      // If not ready yet, show a clean loading overlay instead of showing Looker’s loading between frames
+      const waitStart = Date.now();
+
+      const trySwap = () => {
+        if (isCelebrationVisible()) return;
+
+        if (nextReady) {
+          showLoading(false);
+          current = nextIndex;
+          setVisible(!activeIsA);  // hidden becomes visible
+          // Immediately schedule next preload/switch
+          schedulePreloadAndRotate();
+          return;
+        }
+
+        // Not ready yet — keep overlay, check again shortly
+        showLoading(true);
+
+        // Safety: if we've waited too long, force swap anyway (overlay still hides the worst)
+        if (Date.now() - waitStart > MAX_PRELOAD_WAIT_MS) {
+          nextReady = true;
+        }
+
+        setTimeout(trySwap, 250);
+      };
+
+      trySwap();
+    }
+
+    // Initial boot: load slide 0 into A, then schedule preload/switch
     loadInto(frameA, 0, () => {
-      showActive(true);
-      preloadNext();
+      setVisible(true);
+      schedulePreloadAndRotate();
+      // Start the first preload sooner for smoother first transition
+      setTimeout(startPreloadNext, 3000);
     });
-
-    // Slide rotation
-    setInterval(goNext, SLIDE_MS);
-
-    // Hard refresh visible slide (no switch)
-    setInterval(() => {
-      if (isCelebrationVisible()) return;
-
-      const active = activeFrame();
-      // Reload the SAME page in the ACTIVE frame; you may see a brief refresh.
-      // If you want ZERO visible refresh, set HARD_REFRESH_MS to something large (or disable it).
-      loadInto(active, current, () => {
-        // After refresh, ensure next slide is still preloaded
-        preloadNext();
-      });
-    }, HARD_REFRESH_MS);
 
     /******************** CELEBRATIONS ********************/
     const triggerUrl = "https://script.google.com/macros/s/AKfycbwPFEP8tWC85Xo5RVvjwNvMXSI-W6iqcIvnCfKIpJrehVX-X6jEfaqDkFR_dWTB_ApduA/exec";
@@ -222,6 +322,9 @@
     function showOverlay(kindKey, message) {
       const cfg = CELEBRATIONS[kindKey];
       if (!cfg) return;
+
+      // Hide loading overlay if celebration comes in
+      showLoading(false);
 
       if (currentCelebrationKey !== kindKey) {
         titleEl.textContent = cfg.title;
@@ -268,7 +371,6 @@
 
         if (CELEBRATIONS[status]) showOverlay(status, message);
         else if (overlayVisible) hideOverlay();
-
       } catch (e) {
         console.error(e);
       }
@@ -293,19 +395,11 @@
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
     }
-
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
 
-    /******************** OPTIONAL FIRE-TV SAFETY NET ********************/
-    // If Silk gets stuck, you can reload the whole page every few hours.
-    // Uncomment if needed:
-    /*
-    setInterval(() => {
-      location.reload();
-    }, 6 * 60 * 60 * 1000); // every 6 hours
-    */
+    // Optional: if Fire TV gets weird after long uptime, reload the whole page occasionally
+    // setInterval(() => location.reload(), 6 * 60 * 60 * 1000); // every 6 hours
   </script>
-
 </body>
 </html>
