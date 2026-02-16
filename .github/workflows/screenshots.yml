@@ -3,7 +3,7 @@ name: Update Looker screenshots
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/05 * * * *"  # ✅ every 10 minutes
+    - cron: "*/5 * * * *"  # ✅ every 10 minutes
 
 permissions:
   contents: write
