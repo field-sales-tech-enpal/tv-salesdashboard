@@ -18,23 +18,34 @@
       transition: opacity 250ms linear;
     }
     img.show { opacity: 1; }
+
+    #err {
+      position: fixed; inset: 0;
+      display:none;
+      align-items:center; justify-content:center;
+      color:#fff; font: 20px Arial;
+      padding: 40px; text-align:center;
+      background:#000;
+    }
   </style>
 </head>
 <body>
+  <div id="err"></div>
   <img id="a" class="show" />
   <img id="b" />
 
   <script>
-    const SLIDE_MS = 150000; // 2m30s
+    // ✅ Slide switch every 2 minutes
+    const SLIDE_MS = 2 * 60 * 1000; // 120000
 
     const a = document.getElementById("a");
     const b = document.getElementById("b");
+    const err = document.getElementById("err");
 
     let slides = [];
     let idx = 0;
     let activeIsA = true;
 
-    function active() { return activeIsA ? a : b; }
     function hidden() { return activeIsA ? b : a; }
 
     function swapVisible() {
@@ -43,13 +54,19 @@
       b.classList.toggle("show", !activeIsA);
     }
 
+    function showError(msg) {
+      err.style.display = "flex";
+      err.textContent = msg;
+    }
+
     async function loadManifest() {
       const res = await fetch("shots/manifest.json?cb=" + Date.now());
-      slides = await res.json();
+      if (!res.ok) throw new Error("Cannot load shots/manifest.json (HTTP " + res.status + ")");
+      return res.json();
     }
 
     function setImg(img, file) {
-      // Cache-bust so Fire TV always fetches newest screenshots after updates
+      // ✅ cache-bust so the TV fetches the newest image after each screenshot update run
       img.src = file + "?cb=" + Date.now();
     }
 
@@ -65,14 +82,18 @@
     }
 
     (async () => {
-      await loadManifest();
-      if (!slides.length) return;
+      try {
+        slides = await loadManifest();
+        if (!slides.length) throw new Error("Manifest loaded but contains 0 slides.");
 
-      // initial load
-      setImg(a, slides[0].file);
-      setImg(b, slides[1 % slides.length].file);
+        // initial
+        setImg(a, slides[0].file);
+        setImg(b, slides[1 % slides.length].file);
 
-      setInterval(nextSlide, SLIDE_MS);
+        setInterval(nextSlide, SLIDE_MS);
+      } catch (e) {
+        showError(String(e));
+      }
     })();
   </script>
 </body>
