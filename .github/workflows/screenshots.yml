@@ -2,8 +2,6 @@ name: Update Looker screenshots
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/10 * * * *"
 
 # Only one run at a time. If a new run is triggered while one is in progress,
 # cancel the old one — there's no value in queuing stale screenshot jobs.
