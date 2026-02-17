@@ -5,10 +5,9 @@ on:
   schedule:
     - cron: "*/5 * * * *"
 
-# ✅ prevents two runs pushing at the same time
 concurrency:
   group: looker-screenshots
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -20,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ✅ needed for pull --rebase to work reliably
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -36,6 +35,9 @@ jobs:
       - name: Take screenshots
         run: npm run shots
 
+      - name: Write last-updated marker
+        run: date -u +"%Y-%m-%dT%H:%M:%SZ" > shots/last-updated.txt
+
       - name: Commit & push updated images
         run: |
           set -e
@@ -44,12 +46,8 @@ jobs:
 
           git add shots
 
-          # If nothing changed, exit cleanly
           git diff --cached --quiet && echo "No changes" && exit 0
 
           git commit -m "Update Looker screenshots"
-
-          # ✅ rebase on latest remote to avoid non-fast-forward
           git pull --rebase origin main
-
           git push origin main
