@@ -32,20 +32,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm" # caches ~/.npm between runs
 
-      # Cache Playwright browser binaries. Key includes the lockfile hash so a
+      # Cache Playwright browser binaries. Key includes package.json hash so a
       # deps upgrade automatically busts the cache.
       - name: Cache Playwright browsers
         id: pw-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: playwright-${{ runner.os }}-
 
       - name: Install deps
-        run: npm ci
+        run: npm install
 
       # Skip OS deps on ubuntu-latest (they're pre-installed). If you ever see
       # "Host system is missing dependencies" errors, add --with-deps back.
