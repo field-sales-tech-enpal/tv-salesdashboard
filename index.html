@@ -147,14 +147,6 @@
     </div>
   </div>
 
-  <!-- Keep these so the browser knows the files early -->
-  <audio id="sound-idv" preload="auto">
-    <source src="sounds/idv.mp3" type="audio/mpeg">
-  </audio>
-  <audio id="sound-tbk" preload="auto">
-    <source src="sounds/tbk.mp3" type="audio/mpeg">
-  </audio>
-
   <div id="dbg">
     <div id="dbgText">debug</div>
     <button id="btnTest">TEST CELEBRATION</button>
@@ -182,15 +174,47 @@
     const dbgEl   = document.getElementById("dbg");
     const dbgText = document.getElementById("dbgText");
 
-    const soundIdv = document.getElementById("sound-idv");
-    const soundTbk = document.getElementById("sound-tbk");
-
     if (SHOW_DEBUG) dbgEl.style.display = "block";
 
     function setDbg(t){
       if (!SHOW_DEBUG) return;
       dbgText.textContent = t;
     }
+
+    /******************** AUDIO POOLS ********************/
+    function makeAudioPool(src, size = 4) {
+      const pool = [];
+      for (let i = 0; i < size; i++) {
+        const a = new Audio(src);
+        a.preload = "auto";
+        a.load();
+        pool.push(a);
+      }
+      return { src, pool, index: 0 };
+    }
+
+    function playFromPool(audioPool) {
+      if (!audioPool || !audioPool.pool.length) return;
+
+      const a = audioPool.pool[audioPool.index];
+      audioPool.index = (audioPool.index + 1) % audioPool.pool.length;
+
+      try {
+        a.pause();
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && typeof p.catch === "function") {
+          p.catch((e) => {
+            console.log("audio play blocked/failed", e);
+          });
+        }
+      } catch (e) {
+        console.log("audio error", e);
+      }
+    }
+
+    const soundPoolIdv = makeAudioPool("sounds/idv.mp3", 3);
+    const soundPoolTbk = makeAudioPool("sounds/tbk.mp3", 3);
 
     /******************** SLIDESHOW ********************/
     let slides = [];
@@ -270,12 +294,12 @@
       IDV: {
         title: "🎉 NEW IDV 🎉",
         gif: "https://media.giphy.com/media/Is1O1TWV0LEJi/giphy.gif",
-        sound: soundIdv
+        soundPool: soundPoolIdv
       },
       TBK: {
         title: "🏆 NEW TBK 🏆",
         gif: "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
-        sound: soundTbk
+        soundPool: soundPoolTbk
       }
     };
 
@@ -284,24 +308,6 @@
 
     function isCelebrationVisible() {
       return celebrationEl.style.display === "flex";
-    }
-
-    function playCelebrationSound(audioEl) {
-      if (!audioEl) return;
-
-      try {
-        const src = audioEl.currentSrc || audioEl.src;
-        if (!src) return;
-
-        const s = new Audio(src + (src.includes("?") ? "&" : "?") + "v=" + Date.now());
-        s.preload = "auto";
-        s.volume = 1;
-        s.play().catch((e) => {
-          console.log("audio play blocked/failed", e);
-        });
-      } catch (e) {
-        console.log("audio error", e);
-      }
     }
 
     function showOverlay(kindKey, message) {
@@ -318,8 +324,8 @@
       msgEl.textContent = message || "";
       fadeEl.classList.add("on");
 
-      if (!overlayVisible && cfg.sound) {
-        playCelebrationSound(cfg.sound);
+      if (!overlayVisible && cfg.soundPool) {
+        playFromPool(cfg.soundPool);
       }
 
       celebrationEl.style.display = "flex";
@@ -370,23 +376,25 @@
     poll();
     setInterval(poll, POLL_MS);
 
-    /******************** AUDIO UNLOCK (Fire TV) ********************/
+    /******************** AUDIO UNLOCK ********************/
     function unlockAudio() {
-      const sounds = document.querySelectorAll("audio");
-      sounds.forEach(a => {
-        const src = a.currentSrc || a.src;
-        if (!src) return;
-
-        const probe = new Audio(src);
-        probe.volume = 0;
-
-        const p = probe.play();
-        if (p && typeof p.then === "function") {
-          p.then(() => {
-            probe.pause();
-            probe.currentTime = 0;
-          }).catch(() => {});
-        }
+      [soundPoolIdv, soundPoolTbk].forEach(poolObj => {
+        poolObj.pool.forEach(a => {
+          const prevVol = a.volume;
+          a.volume = 0;
+          const p = a.play();
+          if (p && typeof p.then === "function") {
+            p.then(() => {
+              a.pause();
+              a.currentTime = 0;
+              a.volume = prevVol;
+            }).catch(() => {
+              a.volume = prevVol;
+            });
+          } else {
+            a.volume = prevVol;
+          }
+        });
       });
 
       window.removeEventListener("keydown", unlockAudio);
