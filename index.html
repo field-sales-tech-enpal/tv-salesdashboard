@@ -153,12 +153,12 @@
     </div>
   </div>
 
-  <!-- Sounds -->
+  <!-- Sounds: ONLY CHANGED THESE URLS -->
   <audio id="sound-idv" preload="auto">
-    <source src="https://actions.google.com/sounds/v1/cash_register/cash_register_open.ogg" type="audio/ogg">
+    <source src="sounds/idv.mp3" type="audio/mpeg">
   </audio>
   <audio id="sound-tbk" preload="auto">
-    <source src="https://actions.google.com/sounds/v1/crowd/crowd_cheer.ogg" type="audio/ogg">
+    <source src="sounds/tbk.mp3" type="audio/mpeg">
   </audio>
 
   <!-- Debug (hidden by default) -->
@@ -233,24 +233,20 @@
     }
 
     async function nextSlide() {
-      // Pause slideshow while celebration is visible
       if (isCelebrationVisible()) {
         timer = setTimeout(nextSlide, 1000);
         return;
       }
 
       try {
-        // Fade to black very briefly (cleaner transition)
         fadeEl.classList.add("on");
         await preloadNext();
         idx = (idx + 1) % slides.length;
         swapVisible();
-        // Fade back in
         setTimeout(() => fadeEl.classList.remove("on"), 80);
       } catch (e) {
         console.log(e);
         setDbg("slide err: " + String(e));
-        // Retry soon instead of flashing
         setTimeout(() => fadeEl.classList.remove("on"), 80);
         timer = setTimeout(nextSlide, 2000);
         return;
@@ -264,7 +260,6 @@
         slides = await loadManifest();
         idx = 0;
         await setImgAndWait(slideA, slides[0].file);
-        // Preload next early for instant first switch
         if (slides.length > 1) await setImgAndWait(slideB, slides[1].file);
         timer = setTimeout(nextSlide, SLIDE_MS);
         badge.textContent = "Sales TV • running";
@@ -295,11 +290,27 @@
       return celebrationEl.style.display === "flex";
     }
 
+    function playCelebrationSound(audioEl) {
+      if (!audioEl) return;
+
+      try {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+        const playPromise = audioEl.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch((e) => {
+            console.log("audio play blocked/failed", e);
+          });
+        }
+      } catch (e) {
+        console.log("audio error", e);
+      }
+    }
+
     function showOverlay(kindKey, message) {
       const cfg = CELEBRATIONS[kindKey];
       if (!cfg) return;
 
-      // Make overlay full-screen and on top
       if (currentCelebrationKey !== kindKey) {
         titleEl.textContent = cfg.title;
         celebrationEl.style.backgroundImage =
@@ -308,16 +319,10 @@
       }
       msgEl.textContent = message || "";
 
-      // Fade to black underlay for a clean cut
       fadeEl.classList.add("on");
 
       if (!overlayVisible && cfg.sound) {
-        try {
-          cfg.sound.currentTime = 0;
-          cfg.sound.play();
-        } catch (e) {
-          // Autoplay may be blocked until first keypress (Fire TV)
-        }
+        playCelebrationSound(cfg.sound);
       }
 
       celebrationEl.style.display = "flex";
@@ -374,15 +379,24 @@
       sounds.forEach(a => {
         const prevVol = a.volume;
         a.volume = 0;
-        a.play().then(() => {
-          a.pause();
-          a.currentTime = 0;
+        const p = a.play();
+        if (p && typeof p.then === "function") {
+          p.then(() => {
+            a.pause();
+            a.currentTime = 0;
+            a.volume = prevVol;
+          }).catch(() => {
+            a.volume = prevVol;
+          });
+        } else {
           a.volume = prevVol;
-        }).catch(() => {});
+        }
       });
+
       window.removeEventListener("keydown", unlockAudio);
       window.removeEventListener("pointerdown", unlockAudio);
     }
+
     window.addEventListener("keydown", unlockAudio, { once: true });
     window.addEventListener("pointerdown", unlockAudio, { once: true });
 
