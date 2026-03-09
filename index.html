@@ -20,21 +20,20 @@
       font-family: Arial, sans-serif;
     }
 
-    /* Slides */
     .slide {
       position: fixed;
       inset: 0;
       width: 100%;
       height: 100%;
-      object-fit: contain;     /* change to cover if you want full bleed */
+      object-fit: contain;
       background: var(--bg);
       opacity: 0;
       transition: opacity var(--fade-ms) linear;
-      z-index: 1;              /* always below overlays */
+      z-index: 1;
     }
+
     .slide.show { opacity: 1; }
 
-    /* Black fade between states (optional but looks clean) */
     #fade {
       position: fixed;
       inset: 0;
@@ -44,9 +43,9 @@
       z-index: 5000;
       pointer-events: none;
     }
+
     #fade.on { opacity: 1; }
 
-    /* Celebration overlay (FULL SCREEN ALWAYS) */
     #celebration {
       display: none;
       position: fixed;
@@ -96,7 +95,6 @@
       text-shadow: 0 0 14px rgba(0,0,0,0.85);
     }
 
-    /* Tiny “status” badge (optional, helpful) */
     #statusBadge {
       position: fixed;
       top: 14px;
@@ -111,7 +109,6 @@
       user-select: none;
     }
 
-    /* Debug panel (set SHOW_DEBUG to true in JS) */
     #dbg {
       position: fixed;
       left: 14px;
@@ -126,6 +123,7 @@
       white-space: pre-wrap;
       display: none;
     }
+
     #dbg button{
       margin-top: 8px;
       font: 13px monospace;
@@ -135,17 +133,13 @@
 </head>
 
 <body>
-  <!-- Slides -->
   <img id="slideA" class="slide show" alt="slide A" />
   <img id="slideB" class="slide" alt="slide B" />
 
-  <!-- Optional fade layer -->
   <div id="fade"></div>
 
-  <!-- Small status badge -->
   <div id="statusBadge">Sales TV</div>
 
-  <!-- Celebration overlay -->
   <div id="celebration">
     <div class="card">
       <h1 id="celeTitle">🎉 CELEBRATION 🎉</h1>
@@ -153,7 +147,7 @@
     </div>
   </div>
 
-  <!-- Sounds: ONLY CHANGED THESE URLS -->
+  <!-- Keep these so the browser knows the files early -->
   <audio id="sound-idv" preload="auto">
     <source src="sounds/idv.mp3" type="audio/mpeg">
   </audio>
@@ -161,7 +155,6 @@
     <source src="sounds/tbk.mp3" type="audio/mpeg">
   </audio>
 
-  <!-- Debug (hidden by default) -->
   <div id="dbg">
     <div id="dbgText">debug</div>
     <button id="btnTest">TEST CELEBRATION</button>
@@ -170,11 +163,10 @@
 
   <script>
     /******************** CONFIG ********************/
-    const SLIDE_MS = 2 * 60 * 1000;      // ✅ switch every 2 minutes
-    const POLL_MS  = 2000;               // celebration poll
-    const SHOW_DEBUG = false;            // set true while testing
+    const SLIDE_MS = 2 * 60 * 1000;
+    const POLL_MS  = 2000;
+    const SHOW_DEBUG = false;
 
-    // ✅ Your working Apps Script web app URL:
     const triggerUrl = "https://script.google.com/macros/s/AKfycbwPFEP8tWC85Xo5RVvjwNvMXSI-W6iqcIvnCfKIpJrehVX-X6jEfaqDkFR_dWTB_ApduA/exec";
 
     /******************** DOM ********************/
@@ -189,6 +181,10 @@
 
     const dbgEl   = document.getElementById("dbg");
     const dbgText = document.getElementById("dbgText");
+
+    const soundIdv = document.getElementById("sound-idv");
+    const soundTbk = document.getElementById("sound-tbk");
+
     if (SHOW_DEBUG) dbgEl.style.display = "block";
 
     function setDbg(t){
@@ -209,7 +205,7 @@
       return new Promise((resolve, reject) => {
         img.onload = () => resolve(true);
         img.onerror = () => reject(new Error("image load failed: " + file));
-        img.src = file + "?cb=" + Date.now(); // cache-bust to always use newest screenshots
+        img.src = file + "?cb=" + Date.now();
       });
     }
 
@@ -274,12 +270,12 @@
       IDV: {
         title: "🎉 NEW IDV 🎉",
         gif: "https://media.giphy.com/media/Is1O1TWV0LEJi/giphy.gif",
-        sound: document.getElementById("sound-idv")
+        sound: soundIdv
       },
       TBK: {
         title: "🏆 NEW TBK 🏆",
         gif: "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
-        sound: document.getElementById("sound-tbk")
+        sound: soundTbk
       }
     };
 
@@ -294,14 +290,15 @@
       if (!audioEl) return;
 
       try {
-        audioEl.pause();
-        audioEl.currentTime = 0;
-        const playPromise = audioEl.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch((e) => {
-            console.log("audio play blocked/failed", e);
-          });
-        }
+        const src = audioEl.currentSrc || audioEl.src;
+        if (!src) return;
+
+        const s = new Audio(src + (src.includes("?") ? "&" : "?") + "v=" + Date.now());
+        s.preload = "auto";
+        s.volume = 1;
+        s.play().catch((e) => {
+          console.log("audio play blocked/failed", e);
+        });
       } catch (e) {
         console.log("audio error", e);
       }
@@ -317,8 +314,8 @@
           `linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.25)), url("${cfg.gif}")`;
         currentCelebrationKey = kindKey;
       }
-      msgEl.textContent = message || "";
 
+      msgEl.textContent = message || "";
       fadeEl.classList.add("on");
 
       if (!overlayVisible && cfg.sound) {
@@ -377,19 +374,18 @@
     function unlockAudio() {
       const sounds = document.querySelectorAll("audio");
       sounds.forEach(a => {
-        const prevVol = a.volume;
-        a.volume = 0;
-        const p = a.play();
+        const src = a.currentSrc || a.src;
+        if (!src) return;
+
+        const probe = new Audio(src);
+        probe.volume = 0;
+
+        const p = probe.play();
         if (p && typeof p.then === "function") {
           p.then(() => {
-            a.pause();
-            a.currentTime = 0;
-            a.volume = prevVol;
-          }).catch(() => {
-            a.volume = prevVol;
-          });
-        } else {
-          a.volume = prevVol;
+            probe.pause();
+            probe.currentTime = 0;
+          }).catch(() => {});
         }
       });
 
